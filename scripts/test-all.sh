@@ -11,9 +11,11 @@ echo ""
 "$SCRIPT_DIR/test-app.sh" all
 echo ""
 
-# Run Node.js tests
-"$SCRIPT_DIR/test-client.sh" all
+# Run node tests
 echo ""
+echo "Running Node.js tests"
+npm run test:client
+npm run test:e2e
 
 echo "════════════════════════════════════════"
 echo "✅ All tests completed successfully!"
