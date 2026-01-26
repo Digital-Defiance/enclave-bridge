@@ -1,4 +1,11 @@
 {
+  "name": "enclave-bridge-tests",
+  "version": "1.0.0",
+  "description": "Test utilities for Enclave Bridge",
+  "scripts": {
+    "test:e2e": "node test-enclave-bridge-e2e.js",
+    "test:client": "node test-enclave-bridge-client.js"
+  },
   "dependencies": {
     "@digitaldefiance/mongoose-types": "^8.20.9",
     "@digitaldefiance/node-ecies-lib": "^4.13.9",

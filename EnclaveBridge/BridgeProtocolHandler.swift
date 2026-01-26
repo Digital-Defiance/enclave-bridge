@@ -3,6 +3,7 @@ import CryptoKit
 
 class BridgeProtocolHandler {
     private var peerPublicKey: Data?
+    private static let startTime = Date()
 
     // ECIES encryption helper (node-ecies-lib compatible)
     static func eciesEncrypt(plaintext: Data, peerPublicKey: Data) -> Data? {
@@ -39,6 +40,43 @@ class BridgeProtocolHandler {
             return BridgeProtocolHandler.errorResponse("Invalid request format")
         }
         switch cmd {
+        case "HEARTBEAT":
+            // Simple heartbeat to check if bridge is alive
+            let timestamp = ISO8601DateFormatter().string(from: Date())
+            return BridgeProtocolHandler.jsonResponse([
+                "ok": true,
+                "timestamp": timestamp,
+                "service": "enclave-bridge"
+            ])
+        case "VERSION", "INFO":
+            let dict: [String: Any] = [
+                "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+                "build": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown",
+                "platform": "macOS",
+                "uptimeSeconds": Int(Date().timeIntervalSince(Self.startTime))
+            ]
+            return BridgeProtocolHandler.jsonResponse(dict)
+        case "STATUS":
+            let enclaveAvailable: Bool
+            do {
+                _ = try SecureEnclaveKeyManager.getPublicKeyData()
+                enclaveAvailable = true
+            } catch {
+                enclaveAvailable = false
+            }
+            let dict: [String: Any] = [
+                "ok": true,
+                "peerPublicKeySet": peerPublicKey != nil,
+                "enclaveKeyAvailable": enclaveAvailable
+            ]
+            return BridgeProtocolHandler.jsonResponse(dict)
+        case "METRICS":
+            let dict: [String: Any] = [
+                "uptimeSeconds": Int(Date().timeIntervalSince(Self.startTime)),
+                "service": "enclave-bridge",
+                "requestCounters": [:]  // TODO: hook into real counters once available
+            ]
+            return BridgeProtocolHandler.jsonResponse(dict)
         case "GET_PUBLIC_KEY":
             // Return the secp256k1 public key for ECIES protocol
             do {
@@ -61,6 +99,22 @@ class BridgeProtocolHandler {
                 return BridgeProtocolHandler.jsonResponse(["ok": true])
             } else {
                 return BridgeProtocolHandler.errorResponse("Missing or invalid publicKey")
+            }
+        case "LIST_KEYS":
+            // Report available key identifiers; currently a single ECIES key and one Secure Enclave key
+            do {
+                let eciesPub = try ECIESKeyManager.getOrCreateSecp256k1PublicKey()
+                let enclavePub = try? SecureEnclaveKeyManager.getPublicKeyData()
+                let dict: [String: Any] = [
+                    "ecies": [[
+                        "id": "ecies-default",
+                        "publicKey": eciesPub.base64EncodedString()
+                    ]],
+                    "enclave": enclavePub != nil ? [["id": "enclave-default", "publicKey": enclavePub!.base64EncodedString()]] : []
+                ]
+                return BridgeProtocolHandler.jsonResponse(dict)
+            } catch {
+                return BridgeProtocolHandler.errorResponse("Failed to list keys: \(error.localizedDescription)")
             }
         case "ENCLAVE_SIGN":
             guard let dataStr = json["data"] as? String, let dataToSign = Data(base64Encoded: dataStr) else {
@@ -144,6 +198,9 @@ class BridgeProtocolHandler {
         case "ENCLAVE_GENERATE_KEY":
             // TODO: Generate new Secure Enclave key (handled automatically on first use)
             return BridgeProtocolHandler.errorResponse("ENCLAVE_GENERATE_KEY not implemented")
+        case "ENCLAVE_ROTATE_KEY":
+            // TODO: Implement rotation when Secure Enclave key retrieval/replacement is supported on target platform
+            return BridgeProtocolHandler.errorResponse("ENCLAVE_ROTATE_KEY not supported on this platform")
         default:
             return BridgeProtocolHandler.errorResponse("Unknown command: \(cmd)")
         }

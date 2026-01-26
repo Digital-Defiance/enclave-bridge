@@ -430,6 +430,161 @@ final class BridgeProtocolHandlerTests: XCTestCase {
         XCTAssertTrue(responseDict?["publicKey"] != nil || responseDict?["error"] != nil,
                       "Should return publicKey or error")
     }
+    
+    // MARK: - New Command Tests
+    
+    func testHeartbeat() {
+        let data = try! JSONSerialization.data(withJSONObject: ["cmd": "HEARTBEAT"])
+        let response = handler.handleMessage(data)
+        let responseDict = try? JSONSerialization.jsonObject(with: response) as? [String: Any]
+        
+        XCTAssertNotNil(responseDict, "Should return valid JSON")
+        XCTAssertEqual(responseDict?["ok"] as? Bool, true, "Should return ok: true")
+        XCTAssertNotNil(responseDict?["timestamp"], "Should include timestamp")
+        XCTAssertEqual(responseDict?["service"] as? String, "enclave-bridge", "Should identify service")
+        
+        // Verify timestamp is valid ISO8601
+        if let timestamp = responseDict?["timestamp"] as? String {
+            let formatter = ISO8601DateFormatter()
+            XCTAssertNotNil(formatter.date(from: timestamp), "Timestamp should be valid ISO8601")
+        }
+    }
+    
+    func testVersion() {
+        let data = try! JSONSerialization.data(withJSONObject: ["cmd": "VERSION"])
+        let response = handler.handleMessage(data)
+        let responseDict = try? JSONSerialization.jsonObject(with: response) as? [String: Any]
+        
+        XCTAssertNotNil(responseDict, "Should return valid JSON")
+        XCTAssertNotNil(responseDict?["appVersion"], "Should include appVersion")
+        XCTAssertNotNil(responseDict?["build"], "Should include build")
+        XCTAssertEqual(responseDict?["platform"] as? String, "macOS", "Platform should be macOS")
+        XCTAssertNotNil(responseDict?["uptimeSeconds"], "Should include uptimeSeconds")
+        
+        if let uptime = responseDict?["uptimeSeconds"] as? Int {
+            XCTAssertGreaterThanOrEqual(uptime, 0, "Uptime should be non-negative")
+        }
+    }
+    
+    func testInfo() {
+        // INFO should behave identically to VERSION
+        let data = try! JSONSerialization.data(withJSONObject: ["cmd": "INFO"])
+        let response = handler.handleMessage(data)
+        let responseDict = try? JSONSerialization.jsonObject(with: response) as? [String: Any]
+        
+        XCTAssertNotNil(responseDict, "Should return valid JSON")
+        XCTAssertNotNil(responseDict?["appVersion"], "Should include appVersion")
+        XCTAssertNotNil(responseDict?["build"], "Should include build")
+        XCTAssertEqual(responseDict?["platform"] as? String, "macOS", "Platform should be macOS")
+        XCTAssertNotNil(responseDict?["uptimeSeconds"], "Should include uptimeSeconds")
+    }
+    
+    func testStatus() {
+        let data = try! JSONSerialization.data(withJSONObject: ["cmd": "STATUS"])
+        let response = handler.handleMessage(data)
+        let responseDict = try? JSONSerialization.jsonObject(with: response) as? [String: Any]
+        
+        XCTAssertNotNil(responseDict, "Should return valid JSON")
+        XCTAssertEqual(responseDict?["ok"] as? Bool, true, "Should return ok: true")
+        XCTAssertNotNil(responseDict?["peerPublicKeySet"], "Should include peerPublicKeySet")
+        XCTAssertNotNil(responseDict?["enclaveKeyAvailable"], "Should include enclaveKeyAvailable")
+        
+        // Initially, peer key should not be set
+        XCTAssertEqual(responseDict?["peerPublicKeySet"] as? Bool, false, "Peer key should not be set initially")
+    }
+    
+    func testStatusAfterSettingPeerKey() {
+        // First set a peer public key
+        let validKey = Data(repeating: 0x02, count: 1) + Data(repeating: 0xAB, count: 32)
+        let setKeyData = try! JSONSerialization.data(withJSONObject: [
+            "cmd": "SET_PEER_PUBLIC_KEY",
+            "publicKey": validKey.base64EncodedString()
+        ])
+        _ = handler.handleMessage(setKeyData)
+        
+        // Now check status
+        let statusData = try! JSONSerialization.data(withJSONObject: ["cmd": "STATUS"])
+        let response = handler.handleMessage(statusData)
+        let responseDict = try? JSONSerialization.jsonObject(with: response) as? [String: Any]
+        
+        XCTAssertEqual(responseDict?["peerPublicKeySet"] as? Bool, true, "Peer key should now be set")
+    }
+    
+    func testMetrics() {
+        let data = try! JSONSerialization.data(withJSONObject: ["cmd": "METRICS"])
+        let response = handler.handleMessage(data)
+        let responseDict = try? JSONSerialization.jsonObject(with: response) as? [String: Any]
+        
+        XCTAssertNotNil(responseDict, "Should return valid JSON")
+        XCTAssertEqual(responseDict?["service"] as? String, "enclave-bridge", "Should identify service")
+        XCTAssertNotNil(responseDict?["uptimeSeconds"], "Should include uptimeSeconds")
+        XCTAssertNotNil(responseDict?["requestCounters"], "Should include requestCounters")
+        
+        if let uptime = responseDict?["uptimeSeconds"] as? Int {
+            XCTAssertGreaterThanOrEqual(uptime, 0, "Uptime should be non-negative")
+        }
+    }
+    
+    func testListKeys() {
+        let data = try! JSONSerialization.data(withJSONObject: ["cmd": "LIST_KEYS"])
+        let response = handler.handleMessage(data)
+        let responseDict = try? JSONSerialization.jsonObject(with: response) as? [String: Any]
+        
+        // Should either return keys or error (depends on keychain access)
+        if let error = responseDict?["error"] {
+            // If error, that's acceptable (keychain might not be accessible in test)
+            XCTAssertNotNil(error, "Error should be non-nil if present")
+        } else {
+            XCTAssertNotNil(responseDict?["ecies"], "Should include ecies array")
+            XCTAssertNotNil(responseDict?["enclave"], "Should include enclave array")
+            
+            if let eciesKeys = responseDict?["ecies"] as? [[String: Any]] {
+                XCTAssertGreaterThanOrEqual(eciesKeys.count, 0, "ECIES keys should be an array")
+                if let firstKey = eciesKeys.first {
+                    XCTAssertNotNil(firstKey["id"], "Key should have id")
+                    XCTAssertNotNil(firstKey["publicKey"], "Key should have publicKey")
+                }
+            }
+        }
+    }
+    
+    func testGetEnclavePublicKey() {
+        let data = try! JSONSerialization.data(withJSONObject: ["cmd": "GET_ENCLAVE_PUBLIC_KEY"])
+        let response = handler.handleMessage(data)
+        let responseDict = try? JSONSerialization.jsonObject(with: response) as? [String: Any]
+        
+        // Should either succeed with publicKey or fail with error (depends on Secure Enclave access)
+        XCTAssertTrue(responseDict?["publicKey"] != nil || responseDict?["error"] != nil,
+                      "Should return publicKey or error")
+        
+        if let publicKey = responseDict?["publicKey"] as? String {
+            // Verify it's valid base64
+            XCTAssertNotNil(Data(base64Encoded: publicKey), "Public key should be valid base64")
+        }
+    }
+    
+    func testEnclaveRotateKey() {
+        let data = try! JSONSerialization.data(withJSONObject: ["cmd": "ENCLAVE_ROTATE_KEY"])
+        let response = handler.handleMessage(data)
+        let responseDict = try? JSONSerialization.jsonObject(with: response) as? [String: Any]
+        
+        // Currently returns "not supported" error
+        XCTAssertNotNil(responseDict?["error"], "Should return error (not supported)")
+        if let error = responseDict?["error"] as? String {
+            XCTAssertTrue(error.contains("not supported"), "Error should mention not supported")
+        }
+    }
+    
+    func testUnknownCommand() {
+        let data = try! JSONSerialization.data(withJSONObject: ["cmd": "UNKNOWN_COMMAND_XYZ"])
+        let response = handler.handleMessage(data)
+        let responseDict = try? JSONSerialization.jsonObject(with: response) as? [String: Any]
+        
+        XCTAssertNotNil(responseDict?["error"], "Should return error for unknown command")
+        if let error = responseDict?["error"] as? String {
+            XCTAssertTrue(error.contains("Unknown command"), "Error should mention unknown command")
+        }
+    }
 }
 
 // MARK: - Encryption Type Values Tests
@@ -449,6 +604,149 @@ final class ECIESEncryptionTypeTests: XCTestCase {
     func testMultipleEncryptionTypeValue() {
         // Multiple encryption type should be 0x63 (99)
         XCTAssertEqual(0x63 as UInt8, 99, "Multiple encryption type should be 0x63 (99)")
+    }
+}
+
+// MARK: - Protocol Handler Command Integration Tests
+
+final class BridgeProtocolHandlerIntegrationTests: XCTestCase {
+    
+    var handler: BridgeProtocolHandler!
+    
+    override func setUp() {
+        super.setUp()
+        handler = BridgeProtocolHandler()
+    }
+    
+    override func tearDown() {
+        handler = nil
+        super.tearDown()
+    }
+    
+    // MARK: - Command Sequence Tests
+    
+    /// Tests a typical client session: heartbeat -> get keys -> set peer key -> status
+    func testTypicalClientSession() {
+        // 1. Heartbeat to verify connection
+        let heartbeatData = try! JSONSerialization.data(withJSONObject: ["cmd": "HEARTBEAT"])
+        let heartbeatResp = try? JSONSerialization.jsonObject(with: handler.handleMessage(heartbeatData)) as? [String: Any]
+        XCTAssertEqual(heartbeatResp?["ok"] as? Bool, true, "Heartbeat should succeed")
+        
+        // 2. Get version info
+        let versionData = try! JSONSerialization.data(withJSONObject: ["cmd": "VERSION"])
+        let versionResp = try? JSONSerialization.jsonObject(with: handler.handleMessage(versionData)) as? [String: Any]
+        XCTAssertNotNil(versionResp?["appVersion"], "Should get app version")
+        
+        // 3. Check initial status
+        let statusData1 = try! JSONSerialization.data(withJSONObject: ["cmd": "STATUS"])
+        let statusResp1 = try? JSONSerialization.jsonObject(with: handler.handleMessage(statusData1)) as? [String: Any]
+        XCTAssertEqual(statusResp1?["peerPublicKeySet"] as? Bool, false, "Peer key should not be set initially")
+        
+        // 4. Get bridge public key
+        let getPubKeyData = try! JSONSerialization.data(withJSONObject: ["cmd": "GET_PUBLIC_KEY"])
+        let getPubKeyResp = try? JSONSerialization.jsonObject(with: handler.handleMessage(getPubKeyData)) as? [String: Any]
+        // May succeed or fail depending on keychain access
+        XCTAssertTrue(getPubKeyResp?["publicKey"] != nil || getPubKeyResp?["error"] != nil)
+        
+        // 5. Set peer public key
+        let validKey = Data(repeating: 0x02, count: 1) + Data(repeating: 0xCD, count: 32)
+        let setPeerData = try! JSONSerialization.data(withJSONObject: [
+            "cmd": "SET_PEER_PUBLIC_KEY",
+            "publicKey": validKey.base64EncodedString()
+        ])
+        let setPeerResp = try? JSONSerialization.jsonObject(with: handler.handleMessage(setPeerData)) as? [String: Any]
+        XCTAssertEqual(setPeerResp?["ok"] as? Bool, true, "Should set peer key")
+        
+        // 6. Check status again
+        let statusData2 = try! JSONSerialization.data(withJSONObject: ["cmd": "STATUS"])
+        let statusResp2 = try? JSONSerialization.jsonObject(with: handler.handleMessage(statusData2)) as? [String: Any]
+        XCTAssertEqual(statusResp2?["peerPublicKeySet"] as? Bool, true, "Peer key should now be set")
+        
+        // 7. Get metrics
+        let metricsData = try! JSONSerialization.data(withJSONObject: ["cmd": "METRICS"])
+        let metricsResp = try? JSONSerialization.jsonObject(with: handler.handleMessage(metricsData)) as? [String: Any]
+        XCTAssertNotNil(metricsResp?["uptimeSeconds"], "Should get uptime")
+    }
+    
+    /// Tests multiple heartbeats return consistent service info
+    func testMultipleHeartbeats() {
+        for i in 0..<5 {
+            let data = try! JSONSerialization.data(withJSONObject: ["cmd": "HEARTBEAT"])
+            let response = handler.handleMessage(data)
+            let responseDict = try? JSONSerialization.jsonObject(with: response) as? [String: Any]
+            
+            XCTAssertEqual(responseDict?["ok"] as? Bool, true, "Heartbeat \(i) should return ok")
+            XCTAssertEqual(responseDict?["service"] as? String, "enclave-bridge", "Service name should be consistent")
+        }
+    }
+    
+    /// Tests uptime increases over time
+    func testUptimeIncreases() {
+        let data1 = try! JSONSerialization.data(withJSONObject: ["cmd": "VERSION"])
+        let response1 = handler.handleMessage(data1)
+        let dict1 = try? JSONSerialization.jsonObject(with: response1) as? [String: Any]
+        let uptime1 = dict1?["uptimeSeconds"] as? Int ?? 0
+        
+        // Sleep briefly
+        Thread.sleep(forTimeInterval: 1.1)
+        
+        let data2 = try! JSONSerialization.data(withJSONObject: ["cmd": "VERSION"])
+        let response2 = handler.handleMessage(data2)
+        let dict2 = try? JSONSerialization.jsonObject(with: response2) as? [String: Any]
+        let uptime2 = dict2?["uptimeSeconds"] as? Int ?? 0
+        
+        XCTAssertGreaterThan(uptime2, uptime1, "Uptime should increase over time")
+    }
+    
+    /// Tests VERSION and INFO return identical structure
+    func testVersionAndInfoEquivalent() {
+        let versionData = try! JSONSerialization.data(withJSONObject: ["cmd": "VERSION"])
+        let infoData = try! JSONSerialization.data(withJSONObject: ["cmd": "INFO"])
+        
+        let versionResp = try? JSONSerialization.jsonObject(with: handler.handleMessage(versionData)) as? [String: Any]
+        let infoResp = try? JSONSerialization.jsonObject(with: handler.handleMessage(infoData)) as? [String: Any]
+        
+        // Both should have the same keys
+        XCTAssertEqual(versionResp?["appVersion"] as? String, infoResp?["appVersion"] as? String)
+        XCTAssertEqual(versionResp?["build"] as? String, infoResp?["build"] as? String)
+        XCTAssertEqual(versionResp?["platform"] as? String, infoResp?["platform"] as? String)
+    }
+    
+    /// Tests that LIST_KEYS and GET_PUBLIC_KEY return consistent data
+    func testKeyConsistency() {
+        // Get public key
+        let getPubKeyData = try! JSONSerialization.data(withJSONObject: ["cmd": "GET_PUBLIC_KEY"])
+        let getPubKeyResp = try? JSONSerialization.jsonObject(with: handler.handleMessage(getPubKeyData)) as? [String: Any]
+        
+        // List keys
+        let listKeysData = try! JSONSerialization.data(withJSONObject: ["cmd": "LIST_KEYS"])
+        let listKeysResp = try? JSONSerialization.jsonObject(with: handler.handleMessage(listKeysData)) as? [String: Any]
+        
+        // If both succeed, the ECIES key should match
+        if let pubKey = getPubKeyResp?["publicKey"] as? String,
+           let eciesKeys = listKeysResp?["ecies"] as? [[String: Any]],
+           let firstEciesKey = eciesKeys.first?["publicKey"] as? String {
+            XCTAssertEqual(pubKey, firstEciesKey, "Public keys should match")
+        }
+    }
+    
+    /// Tests error handling for all commands with malformed input
+    func testMalformedInputHandling() {
+        // Test various malformed inputs
+        let malformedInputs: [(String, Data)] = [
+            ("Empty data", Data()),
+            ("Random bytes", Data([0x00, 0xFF, 0xAB, 0xCD])),
+            ("Partial JSON", "{\"cmd\":".data(using: .utf8)!),
+            ("Array instead of object", "[1,2,3]".data(using: .utf8)!),
+            ("Number instead of object", "42".data(using: .utf8)!),
+            ("String instead of object", "\"hello\"".data(using: .utf8)!),
+        ]
+        
+        for (description, input) in malformedInputs {
+            let response = handler.handleMessage(input)
+            let responseDict = try? JSONSerialization.jsonObject(with: response) as? [String: Any]
+            XCTAssertNotNil(responseDict?["error"], "\(description) should return error")
+        }
     }
 }
 

@@ -151,11 +151,23 @@ The bridge uses JSON messages encrypted with ECIES. All communication flows thro
 
 | Command | Description |
 |---------|-------------|
+| `HEARTBEAT` | Liveness check; returns ok + timestamp |
+| `VERSION` / `INFO` | App version, build, platform, uptime |
+| `STATUS` | Health: peer key set flag, enclave availability |
+| `METRICS` | Basic metrics (uptime; counters TBD) |
 | `GET_PUBLIC_KEY` | Get the ECIES secp256k1 public key |
+| `GET_ENCLAVE_PUBLIC_KEY` | Get the Secure Enclave P-256 public key |
 | `SET_PEER_PUBLIC_KEY` | Exchange public keys for encryption |
+| `LIST_KEYS` | Enumerate known ECIES/enclave keys |
 | `ENCLAVE_SIGN` | Sign data with Secure Enclave P-256 key |
 | `ENCLAVE_DECRYPT` | Decrypt data using ECIES |
-| `ENCLAVE_GENERATE_KEY` | Generate a new Secure Enclave key |
+| `ENCLAVE_GENERATE_KEY` | Generate a new Secure Enclave key (not yet implemented) |
+| `ENCLAVE_ROTATE_KEY` | Rotate Secure Enclave key (not supported on current platform) |
+
+#### TODOs
+- Implement Secure Enclave key rotation once key retrieval/replacement is supported on the target platform.
+- Add real request counters to `METRICS` output.
+- `ENCLAVE_GENERATE_KEY`: Currently keys are auto-generated on first use; this command would only be needed for multi-key support.
 
 ### Client Methods
 
