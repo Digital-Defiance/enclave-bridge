@@ -1,0 +1,20 @@
+#!/bin/bash
+# Run all tests for Enclave Bridge
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+echo "🧪 Running all Enclave Bridge tests..."
+echo ""
+
+# Run Swift tests
+"$SCRIPT_DIR/test-app.sh" all
+echo ""
+
+# Run Node.js tests
+"$SCRIPT_DIR/test-client.sh" all
+echo ""
+
+echo "════════════════════════════════════════"
+echo "✅ All tests completed successfully!"
+echo "════════════════════════════════════════"
