@@ -21,7 +21,7 @@
 
 ## Overview
 
-**Enclave Bridge** is a macOS status bar application (SwiftUI, Apple Silicon only) that acts as a secure bridge between Node.js applications and the Apple Silicon Secure Enclave. It exposes Secure Enclave cryptographic operations (key generation, signing, decryption) to Node.js via a Unix file socket, using ECIES encryption (secp256k1) compatible with the [@digitaldefiance/node-ecies-lib](https://www.npmjs.com/package/@digitaldefiance/node-ecies-lib) protocol.
+**Enclave Bridge** is a macOS status bar application (SwiftUI, Apple Silicon only) that acts as a secure bridge between Node.js applications and the Apple Silicon Secure Enclave. It exposes Secure Enclave cryptographic operations (key generation, signing, decryption) to Node.js via a Unix file socket, using ECIES encryption (secp256k1) compatible with the [@digitaldefiance/node-ecies-lib](https://www.npmjs.com/package/@digitaldefiance/node-ecies-lib) protocol and designed specifically for use with [@digitaldefiance/enclave-bridge-client](https://www.npmjs.com/package/@digitaldefiance/enclave-bridge-client) which is co-located in this repository [./enclave-bridge-client](enclave-bridge-client).
 
 ## Features
 
