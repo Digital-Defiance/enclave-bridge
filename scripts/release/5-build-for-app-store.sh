@@ -44,8 +44,17 @@ if [ ! -d "$XCODE_PROJECT" ]; then
     exit 1
 fi
 
-# Check for provisioning profile
+# Check for provisioning profile - also look in repo root
 PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+REPO_PROFILE="$PROJECT_ROOT/Enclave_Bridge.provisionprofile"
+
+# Install profile from repo if it exists but isn't in the profiles folder
+if [ -f "$REPO_PROFILE" ]; then
+    echo -e "${YELLOW}Installing provisioning profile from repo...${NC}"
+    mkdir -p "$PROFILE_DIR"
+    cp "$REPO_PROFILE" "$PROFILE_DIR/"
+fi
+
 if [ ! -d "$PROFILE_DIR" ] || [ -z "$(ls -A "$PROFILE_DIR" 2>/dev/null)" ]; then
     echo -e "${RED}Error: No provisioning profiles found${NC}"
     echo ""
@@ -147,20 +156,56 @@ echo -e "${GREEN}✓ Archive created successfully${NC}"
 # Step 3: Find provisioning profile name
 echo -e "${GREEN}Step 3: Finding provisioning profile...${NC}"
 PROFILE_NAME=""
-for profile in "$PROFILE_DIR"/*.provisionprofile; do
-    if [ -f "$profile" ]; then
-        # Extract the profile name
-        PROFILE_NAME=$(security cms -D -i "$profile" 2>/dev/null | plutil -extract Name raw - 2>/dev/null || basename "$profile" .provisionprofile)
-        if security cms -D -i "$profile" 2>/dev/null | grep -q "$BUNDLE_ID"; then
-            echo -e "${GREEN}Found matching profile: ${PROFILE_NAME}${NC}"
-            break
+
+# First check the repo root for the profile
+if [ -f "$REPO_PROFILE" ]; then
+    if strings "$REPO_PROFILE" | grep -q "$BUNDLE_ID"; then
+        PROFILE_NAME=$(strings "$REPO_PROFILE" | grep -A1 "<key>Name</key>" | grep "<string>" | sed 's/.*<string>\(.*\)<\/string>.*/\1/' | head -1)
+        if [ -z "$PROFILE_NAME" ]; then
+            PROFILE_NAME=$(basename "$REPO_PROFILE" .provisionprofile)
         fi
+        echo -e "${GREEN}Found matching profile in repo: ${PROFILE_NAME}${NC}"
     fi
-done
+fi
+
+# If not found, check the system profiles folder
+if [ -z "$PROFILE_NAME" ]; then
+    for profile in "$PROFILE_DIR"/*.provisionprofile; do
+        if [ -f "$profile" ]; then
+            # Check if this profile matches our bundle ID using strings (more reliable than security cms)
+            if strings "$profile" | grep -q "$BUNDLE_ID"; then
+                # Extract the profile name
+                PROFILE_NAME=$(strings "$profile" | grep -A1 "<key>Name</key>" | grep "<string>" | sed 's/.*<string>\(.*\)<\/string>.*/\1/' | head -1)
+                if [ -z "$PROFILE_NAME" ]; then
+                    PROFILE_NAME=$(basename "$profile" .provisionprofile)
+                fi
+                echo -e "${GREEN}Found matching profile: ${PROFILE_NAME}${NC}"
+                break
+            fi
+        fi
+    done
+fi
 
 if [ -z "$PROFILE_NAME" ]; then
-    PROFILE_NAME="Enclave"
-    echo -e "${YELLOW}Warning: Could not find matching profile, using default name: ${PROFILE_NAME}${NC}"
+    echo -e "${RED}Error: No provisioning profile found for ${BUNDLE_ID}${NC}"
+    echo ""
+    echo "To create a Mac App Store provisioning profile:"
+    echo "  1. Go to https://developer.apple.com/account/resources/profiles/list"
+    echo "  2. Click '+' to create a new profile"
+    echo "  3. Select 'Mac App Store Connect' under Distribution"
+    echo "  4. Select your App ID (${BUNDLE_ID})"
+    echo "  5. Select your '3rd Party Mac Developer Application' certificate"
+    echo "  6. Download and double-click to install"
+    echo ""
+    echo "Available profiles:"
+    for profile in "$PROFILE_DIR"/*.provisionprofile; do
+        if [ -f "$profile" ]; then
+            PNAME=$(strings "$profile" | grep -A1 "<key>Name</key>" | grep "<string>" | sed 's/.*<string>\(.*\)<\/string>.*/\1/' | head -1)
+            PID=$(strings "$profile" | grep -A1 "application-identifier" | grep "<string>" | sed 's/.*<string>\(.*\)<\/string>.*/\1/' | head -1)
+            echo "  - ${PNAME:-$(basename "$profile")} (${PID:-unknown})"
+        fi
+    done
+    exit 1
 fi
 
 # Step 4: Create ExportOptions.plist

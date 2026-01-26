@@ -251,7 +251,7 @@ struct AboutView: View {
                 .multilineTextAlignment(.center)
                 .foregroundColor(.secondary)
             
-            Link("GitHub Repository", destination: URL(string: "https://github.com/Digital-Defiance/enclave")!)
+            Link("GitHub Repository", destination: URL(string: "https://github.com/Digital-Defiance/enclave-bridge")!)
         }
         .padding()
     }

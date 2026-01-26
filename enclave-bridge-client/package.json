@@ -41,7 +41,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Digital-Defiance/enclave.git",
+    "url": "https://github.com/Digital-Defiance/enclave-bridge.git",
     "directory": "enclave-bridge-client"
   },
   "engines": {

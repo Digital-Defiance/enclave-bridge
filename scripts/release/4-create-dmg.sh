@@ -65,7 +65,7 @@ FEATURES:
 - Secure IPC via Unix domain sockets
 
 For more information, visit:
-https://github.com/Digital-Defiance/enclave
+https://github.com/Digital-Defiance/enclave-bridge
 
 License: MIT
 © 2026 Digital Defiance, Jessica Mulein
