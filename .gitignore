@@ -4,5 +4,4 @@
 .github/instructions/codacy.instructions.md
 *.provisionprofile
 **/node_modules/
-enclave-bridge-client/dist/
 build/
