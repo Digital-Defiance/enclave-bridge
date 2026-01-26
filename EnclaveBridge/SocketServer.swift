@@ -126,7 +126,6 @@ class SocketServer {
                 let end = range.upperBound
                 let messageData = dataBuffer.subdata(in: 0..<end)
                 dataBuffer.removeSubrange(0..<end)
-                print("Received: \(messageData as NSData)")
                 
                 // Update activity
                 updateConnectionActivity(connectionId: connectionId)

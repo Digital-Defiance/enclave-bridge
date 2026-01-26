@@ -74,12 +74,14 @@ class AppState: ObservableObject {
     }
     
     func updateConnectionActivity(id: UUID) {
+        // Always increment total requests, even if connection was already removed
+        totalRequestsHandled += 1
+        
         if let index = connections.firstIndex(where: { $0.id == id }) {
             connections[index].lastActivity = Date()
             connections[index].requestCount += 1
-            totalRequestsHandled += 1
-            objectWillChange.send()
         }
+        objectWillChange.send()
     }
     
     // MARK: - Key Management

@@ -232,11 +232,11 @@ describe('EnclaveBridgeClient', () => {
       const testKey = Buffer.from('03' + 'ab'.repeat(32), 'hex'); // Compressed pubkey
       const responsePromise = client.getPublicKey();
 
-      // Simulate response
-      mockSocket.emit('data', `OK:${testKey.toString('base64')}\n`);
+      // Simulate JSON response (matching Swift server protocol)
+      mockSocket.emit('data', JSON.stringify({ publicKey: testKey.toString('base64') }));
       const result = await responsePromise;
 
-      expect(mockSocket.written[0]).toBe('GET_PUBLIC_KEY\n');
+      expect(mockSocket.written[0]).toBe(JSON.stringify({ cmd: 'GET_PUBLIC_KEY' }));
       expect(result.buffer).toEqual(testKey);
       expect(result.hex).toBe(testKey.toString('hex'));
       expect(result.base64).toBe(testKey.toString('base64'));
@@ -247,10 +247,10 @@ describe('EnclaveBridgeClient', () => {
       const testKey = Buffer.from('04' + 'cd'.repeat(64), 'hex'); // Uncompressed pubkey
       const responsePromise = client.getEnclavePublicKey();
 
-      mockSocket.emit('data', `OK:${testKey.toString('base64')}\n`);
+      mockSocket.emit('data', JSON.stringify({ publicKey: testKey.toString('base64') }));
       const result = await responsePromise;
 
-      expect(mockSocket.written[0]).toBe('GET_ENCLAVE_PUBLIC_KEY\n');
+      expect(mockSocket.written[0]).toBe(JSON.stringify({ cmd: 'GET_ENCLAVE_PUBLIC_KEY' }));
       expect(result.buffer).toEqual(testKey);
       expect(result.compressed).toBe(false);
     });
@@ -259,21 +259,21 @@ describe('EnclaveBridgeClient', () => {
       const testKey = Buffer.from('03' + 'ef'.repeat(32), 'hex');
       const responsePromise = client.setPeerPublicKey(testKey);
 
-      mockSocket.emit('data', 'OK:success\n');
+      mockSocket.emit('data', JSON.stringify({ ok: true }));
       await responsePromise;
 
-      expect(mockSocket.written[0]).toBe(`SET_PEER_PUBLIC_KEY:${testKey.toString('base64')}\n`);
+      expect(mockSocket.written[0]).toBe(JSON.stringify({ cmd: 'SET_PEER_PUBLIC_KEY', publicKey: testKey.toString('base64') }));
     });
 
     it('setPeerPublicKey should accept hex string', async () => {
       const testKeyHex = '03' + 'ef'.repeat(32);
       const responsePromise = client.setPeerPublicKey(testKeyHex);
 
-      mockSocket.emit('data', 'OK:success\n');
+      mockSocket.emit('data', JSON.stringify({ ok: true }));
       await responsePromise;
 
       const expectedPayload = Buffer.from(testKeyHex, 'hex').toString('base64');
-      expect(mockSocket.written[0]).toBe(`SET_PEER_PUBLIC_KEY:${expectedPayload}\n`);
+      expect(mockSocket.written[0]).toBe(JSON.stringify({ cmd: 'SET_PEER_PUBLIC_KEY', publicKey: expectedPayload }));
     });
 
     it('enclaveSign should send command and parse signature', async () => {
@@ -281,10 +281,10 @@ describe('EnclaveBridgeClient', () => {
       const testSig = Buffer.from('signature_data');
       const responsePromise = client.enclaveSign(testData);
 
-      mockSocket.emit('data', `OK:${testSig.toString('base64')}\n`);
+      mockSocket.emit('data', JSON.stringify({ signature: testSig.toString('base64') }));
       const result = await responsePromise;
 
-      expect(mockSocket.written[0]).toBe(`ENCLAVE_SIGN:${testData.toString('base64')}\n`);
+      expect(mockSocket.written[0]).toBe(JSON.stringify({ cmd: 'ENCLAVE_SIGN', data: testData.toString('base64') }));
       expect(result.buffer).toEqual(testSig);
       expect(result.format).toBe('der');
     });
@@ -294,11 +294,11 @@ describe('EnclaveBridgeClient', () => {
       const testSig = Buffer.from('signature_data');
       const responsePromise = client.enclaveSign(testMessage);
 
-      mockSocket.emit('data', `OK:${testSig.toString('base64')}\n`);
+      mockSocket.emit('data', JSON.stringify({ signature: testSig.toString('base64') }));
       await responsePromise;
 
       const expectedPayload = Buffer.from(testMessage).toString('base64');
-      expect(mockSocket.written[0]).toBe(`ENCLAVE_SIGN:${expectedPayload}\n`);
+      expect(mockSocket.written[0]).toBe(JSON.stringify({ cmd: 'ENCLAVE_SIGN', data: expectedPayload }));
     });
 
     it('decrypt should send command and parse plaintext', async () => {
@@ -306,10 +306,10 @@ describe('EnclaveBridgeClient', () => {
       const plaintext = Buffer.from('hello world');
       const responsePromise = client.decrypt(encryptedData);
 
-      mockSocket.emit('data', `OK:${plaintext.toString('base64')}\n`);
+      mockSocket.emit('data', JSON.stringify({ plaintext: plaintext.toString('base64') }));
       const result = await responsePromise;
 
-      expect(mockSocket.written[0]).toBe(`ENCLAVE_DECRYPT:${encryptedData.toString('base64')}\n`);
+      expect(mockSocket.written[0]).toBe(JSON.stringify({ cmd: 'ENCLAVE_DECRYPT', data: encryptedData.toString('base64') }));
       expect(result.buffer).toEqual(plaintext);
       expect(result.text).toBe('hello world');
     });
@@ -319,7 +319,7 @@ describe('EnclaveBridgeClient', () => {
       const plaintext = Buffer.from('hello world');
       const responsePromise = client.enclaveDecrypt(encryptedData);
 
-      mockSocket.emit('data', `OK:${plaintext.toString('base64')}\n`);
+      mockSocket.emit('data', JSON.stringify({ plaintext: plaintext.toString('base64') }));
       const result = await responsePromise;
 
       expect(result.text).toBe('hello world');
@@ -329,25 +329,25 @@ describe('EnclaveBridgeClient', () => {
       const newKey = Buffer.from('03' + 'ab'.repeat(32), 'hex');
       const responsePromise = client.enclaveGenerateKey();
 
-      mockSocket.emit('data', `OK:${newKey.toString('base64')}\n`);
+      mockSocket.emit('data', JSON.stringify({ publicKey: newKey.toString('base64') }));
       const result = await responsePromise;
 
-      expect(mockSocket.written[0]).toBe('ENCLAVE_GENERATE_KEY\n');
+      expect(mockSocket.written[0]).toBe(JSON.stringify({ cmd: 'ENCLAVE_GENERATE_KEY' }));
       expect(result.publicKey.buffer).toEqual(newKey);
     });
 
-    it('should throw on ERROR response', async () => {
+    it('should throw on error response', async () => {
       const responsePromise = client.getPublicKey();
-      mockSocket.emit('data', 'ERROR:Key not found\n');
+      mockSocket.emit('data', JSON.stringify({ error: 'Key not found' }));
 
       await expect(responsePromise).rejects.toThrow('Key not found');
     });
 
-    it('should throw on invalid response format', async () => {
+    it('should throw on missing publicKey field', async () => {
       const responsePromise = client.getPublicKey();
-      mockSocket.emit('data', 'INVALID\n');
+      mockSocket.emit('data', JSON.stringify({ ok: true }));
 
-      await expect(responsePromise).rejects.toThrow('Invalid response');
+      await expect(responsePromise).rejects.toThrow('missing publicKey');
     });
   });
 
@@ -360,7 +360,7 @@ describe('EnclaveBridgeClient', () => {
 
       const pingPromise = client.ping();
       const testKey = Buffer.from('03' + 'ab'.repeat(32), 'hex');
-      mockSocket.emit('data', `OK:${testKey.toString('base64')}\n`);
+      mockSocket.emit('data', JSON.stringify({ publicKey: testKey.toString('base64') }));
 
       expect(await pingPromise).toBe(true);
     });

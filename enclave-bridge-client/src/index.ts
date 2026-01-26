@@ -187,32 +187,91 @@ export class EnclaveBridgeClient extends EventEmitter {
 
   /**
    * Handle incoming data from the socket
+   *
+   * The Swift server sends JSON responses without newlines,
+   * so we parse complete JSON objects by tracking braces.
    */
   private handleData(data: string): void {
     this.responseBuffer += data;
 
-    // Check if we have a complete response (newline terminated)
-    const newlineIndex = this.responseBuffer.indexOf('\n');
-    if (newlineIndex !== -1) {
-      const response = this.responseBuffer.substring(0, newlineIndex);
-      this.responseBuffer = this.responseBuffer.substring(newlineIndex + 1);
+    // Try to parse complete JSON objects
+    let startIndex = 0;
+    while (startIndex < this.responseBuffer.length) {
+      const jsonStart = this.responseBuffer.indexOf('{', startIndex);
+      if (jsonStart === -1) {
+        this.responseBuffer = this.responseBuffer.substring(startIndex);
+        return;
+      }
+
+      // Find matching closing brace
+      let braceCount = 0;
+      let inString = false;
+      let escaped = false;
+      let jsonEnd = -1;
+
+      for (let i = jsonStart; i < this.responseBuffer.length; i++) {
+        const char = this.responseBuffer[i];
+
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+
+        if (char === '\\' && inString) {
+          escaped = true;
+          continue;
+        }
+
+        if (char === '"') {
+          inString = !inString;
+          continue;
+        }
+
+        if (!inString) {
+          if (char === '{') {
+            braceCount++;
+          } else if (char === '}') {
+            braceCount--;
+            if (braceCount === 0) {
+              jsonEnd = i;
+              break;
+            }
+          }
+        }
+      }
+
+      if (jsonEnd === -1) {
+        // Incomplete JSON, wait for more data
+        this.responseBuffer = this.responseBuffer.substring(jsonStart);
+        return;
+      }
+
+      // Extract complete JSON
+      const jsonStr = this.responseBuffer.substring(jsonStart, jsonEnd + 1);
+      startIndex = jsonEnd + 1;
 
       if (this.pendingRequest) {
         clearTimeout(this.pendingRequest.timer);
-        this.pendingRequest.resolve(response);
+        this.pendingRequest.resolve(jsonStr);
         this.pendingRequest = null;
       }
     }
+
+    this.responseBuffer = this.responseBuffer.substring(startIndex);
   }
 
   /**
    * Send a command to the bridge and wait for response
    *
+   * Protocol format: JSON object with "cmd" field and optional data fields
+   * Example: {"cmd":"GET_PUBLIC_KEY"}
+   * Example: {"cmd":"ENCLAVE_SIGN","data":"base64data"}
+   *
    * @param command - The command to send
-   * @param payload - Optional payload (will be base64 encoded)
-   * @returns Promise resolving to the response string
+   * @param payload - Optional payload object to include in the request
+   * @returns Promise resolving to the response string (JSON)
    */
-  private async sendCommand(command: string, payload?: Buffer | string): Promise<string> {
+  private async sendCommand(command: string, payload?: Record<string, string>): Promise<string> {
     if (!this.socket || !this.isConnected) {
       throw new Error('Not connected to EnclaveBridge');
     }
@@ -229,14 +288,9 @@ export class EnclaveBridgeClient extends EventEmitter {
 
       this.pendingRequest = { resolve, reject, timer };
 
-      let message: string;
-      if (payload) {
-        const base64Payload =
-          typeof payload === 'string' ? Buffer.from(payload).toString('base64') : payload.toString('base64');
-        message = `${command}:${base64Payload}\n`;
-      } else {
-        message = `${command}\n`;
-      }
+      // Build JSON message according to the protocol spec
+      const request: Record<string, string> = { cmd: command, ...payload };
+      const message = JSON.stringify(request);
 
       this.socket!.write(message);
     });
@@ -245,24 +299,24 @@ export class EnclaveBridgeClient extends EventEmitter {
   /**
    * Parse the bridge response
    *
-   * @param response - Raw response string
+   * Protocol format: JSON object with either data fields or "error" field
+   * Success: {"publicKey":"..."}  or {"ok":true} or {"signature":"..."} etc.
+   * Error: {"error":"message"}
+   *
+   * @param response - Raw JSON response string
    * @returns Parsed response object
    */
-  private parseResponse(response: string): BridgeResponse {
-    const colonIndex = response.indexOf(':');
-    if (colonIndex === -1) {
-      return { success: false, error: `Invalid response format: ${response}` };
-    }
+  private parseResponse(response: string): BridgeResponse & { json?: Record<string, unknown> } {
+    try {
+      const json = JSON.parse(response) as Record<string, unknown>;
 
-    const status = response.substring(0, colonIndex);
-    const data = response.substring(colonIndex + 1);
+      if ('error' in json && typeof json.error === 'string') {
+        return { success: false, error: json.error };
+      }
 
-    if (status === 'OK') {
-      return { success: true, data };
-    } else if (status === 'ERROR') {
-      return { success: false, error: data };
-    } else {
-      return { success: false, error: `Unknown response status: ${status}` };
+      return { success: true, json };
+    } catch {
+      return { success: false, error: `Invalid JSON response: ${response}` };
     }
   }
 
@@ -282,11 +336,15 @@ export class EnclaveBridgeClient extends EventEmitter {
     const response = await this.sendCommand('GET_PUBLIC_KEY');
     const parsed = this.parseResponse(response);
 
-    if (!parsed.success) {
+    if (!parsed.success || !parsed.json) {
       throw new Error(`Failed to get public key: ${parsed.error}`);
     }
 
-    const base64Key = parsed.data!;
+    const base64Key = parsed.json.publicKey as string;
+    if (!base64Key) {
+      throw new Error('Response missing publicKey field');
+    }
+
     const buffer = Buffer.from(base64Key, 'base64');
 
     return {
@@ -310,11 +368,15 @@ export class EnclaveBridgeClient extends EventEmitter {
     const response = await this.sendCommand('GET_ENCLAVE_PUBLIC_KEY');
     const parsed = this.parseResponse(response);
 
-    if (!parsed.success) {
+    if (!parsed.success || !parsed.json) {
       throw new Error(`Failed to get Enclave public key: ${parsed.error}`);
     }
 
-    const base64Key = parsed.data!;
+    const base64Key = parsed.json.publicKey as string;
+    if (!base64Key) {
+      throw new Error('Response missing publicKey field');
+    }
+
     const buffer = Buffer.from(base64Key, 'base64');
 
     return {
@@ -350,7 +412,9 @@ export class EnclaveBridgeClient extends EventEmitter {
       throw new Error('Public key must be a string or Buffer');
     }
 
-    const response = await this.sendCommand('SET_PEER_PUBLIC_KEY', keyBuffer);
+    const response = await this.sendCommand('SET_PEER_PUBLIC_KEY', {
+      publicKey: keyBuffer.toString('base64'),
+    });
     const parsed = this.parseResponse(response);
 
     if (!parsed.success) {
@@ -373,14 +437,20 @@ export class EnclaveBridgeClient extends EventEmitter {
    */
   async enclaveSign(data: Buffer | string): Promise<SignatureResult> {
     const dataBuffer = typeof data === 'string' ? Buffer.from(data) : data;
-    const response = await this.sendCommand('ENCLAVE_SIGN', dataBuffer);
+    const response = await this.sendCommand('ENCLAVE_SIGN', {
+      data: dataBuffer.toString('base64'),
+    });
     const parsed = this.parseResponse(response);
 
-    if (!parsed.success) {
+    if (!parsed.success || !parsed.json) {
       throw new Error(`Failed to sign: ${parsed.error}`);
     }
 
-    const signatureBase64 = parsed.data!;
+    const signatureBase64 = parsed.json.signature as string;
+    if (!signatureBase64) {
+      throw new Error('Response missing signature field');
+    }
+
     const signatureBuffer = Buffer.from(signatureBase64, 'base64');
 
     return {
@@ -409,14 +479,20 @@ export class EnclaveBridgeClient extends EventEmitter {
    * @returns Promise resolving to the decrypted data
    */
   async decrypt(encryptedData: Buffer): Promise<DecryptionResult> {
-    const response = await this.sendCommand('ENCLAVE_DECRYPT', encryptedData);
+    const response = await this.sendCommand('ENCLAVE_DECRYPT', {
+      data: encryptedData.toString('base64'),
+    });
     const parsed = this.parseResponse(response);
 
-    if (!parsed.success) {
+    if (!parsed.success || !parsed.json) {
       throw new Error(`Failed to decrypt: ${parsed.error}`);
     }
 
-    const plaintextBase64 = parsed.data!;
+    const plaintextBase64 = parsed.json.plaintext as string;
+    if (!plaintextBase64) {
+      throw new Error('Response missing plaintext field');
+    }
+
     const plaintextBuffer = Buffer.from(plaintextBase64, 'base64');
 
     return {
@@ -452,11 +528,15 @@ export class EnclaveBridgeClient extends EventEmitter {
     const response = await this.sendCommand('ENCLAVE_GENERATE_KEY');
     const parsed = this.parseResponse(response);
 
-    if (!parsed.success) {
+    if (!parsed.success || !parsed.json) {
       throw new Error(`Failed to generate key: ${parsed.error}`);
     }
 
-    const publicKeyBase64 = parsed.data!;
+    const publicKeyBase64 = parsed.json.publicKey as string;
+    if (!publicKeyBase64) {
+      throw new Error('Response missing publicKey field');
+    }
+
     const publicKeyBuffer = Buffer.from(publicKeyBase64, 'base64');
 
     return {

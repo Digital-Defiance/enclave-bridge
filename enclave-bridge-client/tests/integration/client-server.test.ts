@@ -48,7 +48,11 @@ describe('Integration: Client-Server Communication', () => {
     }
   });
 
-  const startServer = (handler: (socket: Socket, data: string) => void): Promise<void> => {
+  /**
+   * Start a mock server that speaks the JSON protocol matching the Swift server.
+   * The Swift server parses JSON by looking for '}' characters.
+   */
+  const startServer = (handler: (socket: Socket, request: Record<string, unknown>) => void): Promise<void> => {
     return new Promise((resolve) => {
       server = createServer((socket) => {
         clients.push(socket);
@@ -57,11 +61,52 @@ describe('Integration: Client-Server Communication', () => {
         let buffer = '';
         socket.on('data', (data) => {
           buffer += data;
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            if (line) handler(socket, line);
+          
+          // Parse JSON by finding complete objects (matching Swift server behavior)
+          let braceCount = 0;
+          let inString = false;
+          let escaped = false;
+          let jsonStart = -1;
+          
+          for (let i = 0; i < buffer.length; i++) {
+            const char = buffer[i];
+            
+            if (escaped) {
+              escaped = false;
+              continue;
+            }
+            
+            if (char === '\\' && inString) {
+              escaped = true;
+              continue;
+            }
+            
+            if (char === '"') {
+              inString = !inString;
+              continue;
+            }
+            
+            if (!inString) {
+              if (char === '{') {
+                if (braceCount === 0) jsonStart = i;
+                braceCount++;
+              } else if (char === '}') {
+                braceCount--;
+                if (braceCount === 0 && jsonStart !== -1) {
+                  const jsonStr = buffer.substring(jsonStart, i + 1);
+                  buffer = buffer.substring(i + 1);
+                  i = -1; // Reset loop for remaining buffer
+                  jsonStart = -1;
+                  
+                  try {
+                    const request = JSON.parse(jsonStr) as Record<string, unknown>;
+                    handler(socket, request);
+                  } catch {
+                    socket.write(JSON.stringify({ error: 'Invalid JSON' }));
+                  }
+                }
+              }
+            }
           }
         });
       });
@@ -121,13 +166,13 @@ describe('Integration: Client-Server Communication', () => {
     });
   });
 
-  describe('Command-response flow', () => {
+  describe('Command-response flow (JSON protocol)', () => {
     it('should send and receive GET_PUBLIC_KEY', async () => {
       const testKey = Buffer.from('03' + 'ab'.repeat(32), 'hex');
 
-      await startServer((socket, data) => {
-        if (data === 'GET_PUBLIC_KEY') {
-          socket.write(`OK:${testKey.toString('base64')}\n`);
+      await startServer((socket, request) => {
+        if (request.cmd === 'GET_PUBLIC_KEY') {
+          socket.write(JSON.stringify({ publicKey: testKey.toString('base64') }));
         }
       });
 
@@ -145,9 +190,9 @@ describe('Integration: Client-Server Communication', () => {
     it('should send and receive GET_ENCLAVE_PUBLIC_KEY', async () => {
       const testKey = Buffer.from('04' + 'cd'.repeat(64), 'hex');
 
-      await startServer((socket, data) => {
-        if (data === 'GET_ENCLAVE_PUBLIC_KEY') {
-          socket.write(`OK:${testKey.toString('base64')}\n`);
+      await startServer((socket, request) => {
+        if (request.cmd === 'GET_ENCLAVE_PUBLIC_KEY') {
+          socket.write(JSON.stringify({ publicKey: testKey.toString('base64') }));
         }
       });
 
@@ -162,13 +207,13 @@ describe('Integration: Client-Server Communication', () => {
       await client.disconnect();
     });
 
-    it('should send SET_PEER_PUBLIC_KEY with payload', async () => {
+    it('should send SET_PEER_PUBLIC_KEY with publicKey in JSON', async () => {
       const peerKey = Buffer.from('03' + 'ef'.repeat(32), 'hex');
-      let receivedCommand = '';
+      let receivedRequest: Record<string, unknown> | null = null;
 
-      await startServer((socket, data) => {
-        receivedCommand = data;
-        socket.write('OK:success\n');
+      await startServer((socket, request) => {
+        receivedRequest = request;
+        socket.write(JSON.stringify({ ok: true }));
       });
 
       const client = new EnclaveBridgeClient({ socketPath });
@@ -176,7 +221,10 @@ describe('Integration: Client-Server Communication', () => {
 
       await client.setPeerPublicKey(peerKey);
 
-      expect(receivedCommand).toBe(`SET_PEER_PUBLIC_KEY:${peerKey.toString('base64')}`);
+      expect(receivedRequest).toEqual({
+        cmd: 'SET_PEER_PUBLIC_KEY',
+        publicKey: peerKey.toString('base64'),
+      });
 
       await client.disconnect();
     });
@@ -184,10 +232,12 @@ describe('Integration: Client-Server Communication', () => {
     it('should send ENCLAVE_SIGN and receive signature', async () => {
       const testMessage = Buffer.from('message to sign');
       const testSignature = Buffer.from('mock_signature_bytes');
+      let receivedRequest: Record<string, unknown> | null = null;
 
-      await startServer((socket, data) => {
-        if (data.startsWith('ENCLAVE_SIGN:')) {
-          socket.write(`OK:${testSignature.toString('base64')}\n`);
+      await startServer((socket, request) => {
+        if (request.cmd === 'ENCLAVE_SIGN') {
+          receivedRequest = request;
+          socket.write(JSON.stringify({ signature: testSignature.toString('base64') }));
         }
       });
 
@@ -196,6 +246,10 @@ describe('Integration: Client-Server Communication', () => {
 
       const result = await client.enclaveSign(testMessage);
 
+      expect(receivedRequest).toEqual({
+        cmd: 'ENCLAVE_SIGN',
+        data: testMessage.toString('base64'),
+      });
       expect(result.buffer).toEqual(testSignature);
       expect(result.format).toBe('der');
 
@@ -205,10 +259,12 @@ describe('Integration: Client-Server Communication', () => {
     it('should send ENCLAVE_DECRYPT and receive plaintext', async () => {
       const encrypted = Buffer.from('encrypted_data');
       const plaintext = Buffer.from('decrypted message');
+      let receivedRequest: Record<string, unknown> | null = null;
 
-      await startServer((socket, data) => {
-        if (data.startsWith('ENCLAVE_DECRYPT:')) {
-          socket.write(`OK:${plaintext.toString('base64')}\n`);
+      await startServer((socket, request) => {
+        if (request.cmd === 'ENCLAVE_DECRYPT') {
+          receivedRequest = request;
+          socket.write(JSON.stringify({ plaintext: plaintext.toString('base64') }));
         }
       });
 
@@ -217,6 +273,10 @@ describe('Integration: Client-Server Communication', () => {
 
       const result = await client.decrypt(encrypted);
 
+      expect(receivedRequest).toEqual({
+        cmd: 'ENCLAVE_DECRYPT',
+        data: encrypted.toString('base64'),
+      });
       expect(result.buffer).toEqual(plaintext);
       expect(result.text).toBe('decrypted message');
 
@@ -226,9 +286,9 @@ describe('Integration: Client-Server Communication', () => {
     it('should send ENCLAVE_GENERATE_KEY and receive new key', async () => {
       const newKey = Buffer.from('03' + '11'.repeat(32), 'hex');
 
-      await startServer((socket, data) => {
-        if (data === 'ENCLAVE_GENERATE_KEY') {
-          socket.write(`OK:${newKey.toString('base64')}\n`);
+      await startServer((socket, request) => {
+        if (request.cmd === 'ENCLAVE_GENERATE_KEY') {
+          socket.write(JSON.stringify({ publicKey: newKey.toString('base64') }));
         }
       });
 
@@ -244,9 +304,9 @@ describe('Integration: Client-Server Communication', () => {
   });
 
   describe('Error handling', () => {
-    it('should handle ERROR responses', async () => {
-      await startServer((socket, data) => {
-        socket.write('ERROR:Key not found\n');
+    it('should handle error responses', async () => {
+      await startServer((socket) => {
+        socket.write(JSON.stringify({ error: 'Key not found' }));
       });
 
       const client = new EnclaveBridgeClient({ socketPath });
@@ -258,7 +318,7 @@ describe('Integration: Client-Server Communication', () => {
     });
 
     it('should handle server closing during request', async () => {
-      await startServer((socket, data) => {
+      await startServer((socket) => {
         socket.destroy();
       });
 
@@ -287,11 +347,11 @@ describe('Integration: Client-Server Communication', () => {
       const key1 = Buffer.from('03' + 'aa'.repeat(32), 'hex');
       const key2 = Buffer.from('04' + 'bb'.repeat(64), 'hex');
 
-      await startServer((socket, data) => {
-        if (data === 'GET_PUBLIC_KEY') {
-          socket.write(`OK:${key1.toString('base64')}\n`);
-        } else if (data === 'GET_ENCLAVE_PUBLIC_KEY') {
-          socket.write(`OK:${key2.toString('base64')}\n`);
+      await startServer((socket, request) => {
+        if (request.cmd === 'GET_PUBLIC_KEY') {
+          socket.write(JSON.stringify({ publicKey: key1.toString('base64') }));
+        } else if (request.cmd === 'GET_ENCLAVE_PUBLIC_KEY') {
+          socket.write(JSON.stringify({ publicKey: key2.toString('base64') }));
         }
       });
 
@@ -308,10 +368,10 @@ describe('Integration: Client-Server Communication', () => {
     });
 
     it('should reject concurrent requests', async () => {
-      await startServer((socket, data) => {
+      await startServer((socket) => {
         // Delayed response
         setTimeout(() => {
-          socket.write('OK:test\n');
+          socket.write(JSON.stringify({ publicKey: 'dGVzdA==' }));
         }, 50);
       });
 
@@ -366,7 +426,10 @@ describe('Integration: ECIES Format Handling', () => {
     }
   });
 
-  const startServer = (handler: (socket: Socket, data: string) => void): Promise<void> => {
+  /**
+   * Start a mock server that speaks the JSON protocol matching the Swift server.
+   */
+  const startServer = (handler: (socket: Socket, request: Record<string, unknown>) => void): Promise<void> => {
     return new Promise((resolve) => {
       server = createServer((socket) => {
         clients.push(socket);
@@ -375,11 +438,52 @@ describe('Integration: ECIES Format Handling', () => {
         let buffer = '';
         socket.on('data', (data) => {
           buffer += data;
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            if (line) handler(socket, line);
+          
+          // Parse JSON by finding complete objects (matching Swift server behavior)
+          let braceCount = 0;
+          let inString = false;
+          let escaped = false;
+          let jsonStart = -1;
+          
+          for (let i = 0; i < buffer.length; i++) {
+            const char = buffer[i];
+            
+            if (escaped) {
+              escaped = false;
+              continue;
+            }
+            
+            if (char === '\\' && inString) {
+              escaped = true;
+              continue;
+            }
+            
+            if (char === '"') {
+              inString = !inString;
+              continue;
+            }
+            
+            if (!inString) {
+              if (char === '{') {
+                if (braceCount === 0) jsonStart = i;
+                braceCount++;
+              } else if (char === '}') {
+                braceCount--;
+                if (braceCount === 0 && jsonStart !== -1) {
+                  const jsonStr = buffer.substring(jsonStart, i + 1);
+                  buffer = buffer.substring(i + 1);
+                  i = -1;
+                  jsonStart = -1;
+                  
+                  try {
+                    const request = JSON.parse(jsonStr) as Record<string, unknown>;
+                    handler(socket, request);
+                  } catch {
+                    socket.write(JSON.stringify({ error: 'Invalid JSON' }));
+                  }
+                }
+              }
+            }
           }
         });
       });
@@ -405,15 +509,14 @@ describe('Integration: ECIES Format Handling', () => {
 
     const plaintext = Buffer.from('hello world');
 
-    await startServer((socket, data) => {
-      if (data.startsWith('ENCLAVE_DECRYPT:')) {
-        const payloadBase64 = data.split(':')[1];
-        const receivedData = Buffer.from(payloadBase64, 'base64');
+    await startServer((socket, request) => {
+      if (request.cmd === 'ENCLAVE_DECRYPT') {
+        const receivedData = Buffer.from(request.data as string, 'base64');
 
         // Verify the received data matches what we sent
         expect(receivedData).toEqual(eciesData);
 
-        socket.write(`OK:${plaintext.toString('base64')}\n`);
+        socket.write(JSON.stringify({ plaintext: plaintext.toString('base64') }));
       }
     });
 
