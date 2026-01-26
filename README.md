@@ -1,7 +1,7 @@
 # Enclave Bridge
 
 <p align="center">
-  <img src="scripts/enclave-icon.svg" alt="Enclave Bridge Logo" width="128" height="128">
+  <img src="EnclaveBridge.svg" alt="Enclave Bridge Logo" width="128" height="128">
 </p>
 
 <p align="center">
@@ -31,6 +31,8 @@
 - 📱 **Status Bar App** - Lightweight SwiftUI app running in the menu bar
 - 📊 **Real-time Monitoring** - View active connections, key status, and statistics
 - 🛡️ **Zero Trust** - All communication encrypted end-to-end with ECIES
+
+<img width="1440" height="900" alt="Screenshot 2026-01-25 at 5 26 47 PM" src="https://github.com/user-attachments/assets/3344b75e-4dac-471f-b731-746f3c0cb4e1" />
 
 ## Requirements
 
