@@ -28,10 +28,11 @@ struct EnclaveApp: App {
         return path
     }
     
-    let socketServer = SocketServer(socketPath: EnclaveApp.socketPath())
+    // Shared socket server instance for cleanup on termination
+    static let socketServer = SocketServer(socketPath: EnclaveApp.socketPath())
 
     init() {
-        socketServer.start()
+        EnclaveApp.socketServer.start()
         // Update app state
         Task { @MainActor in
             AppState.shared.isServerRunning = true
@@ -48,7 +49,7 @@ struct EnclaveApp: App {
         .commands {
             CommandGroup(replacing: .appTermination) {
                 Button("Quit Enclave Bridge") {
-                    socketServer.stop()
+                    EnclaveApp.socketServer.stop()
                     NSApplication.shared.terminate(nil)
                 }
                 .keyboardShortcut("q")
@@ -98,6 +99,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         // Keep running in status bar when window is closed
         return false
+    }
+    
+    func applicationWillTerminate(_ notification: Notification) {
+        // Clean up the socket file when the app terminates
+        EnclaveApp.socketServer.stop()
     }
     
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
