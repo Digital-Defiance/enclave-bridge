@@ -244,7 +244,9 @@ struct AboutView: View {
                 .font(.title)
                 .fontWeight(.bold)
             
-            Text("Version 1.0.0")
+            let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "–"
+            let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "–"
+            Text("Version \(version) (\(build))")
                 .foregroundColor(.secondary)
             
             Text("Secure bridge between Node.js and Apple Silicon Secure Enclave")
