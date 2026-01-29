@@ -17,6 +17,8 @@
   <a href="#development">Development</a>
 </p>
 
+### Available on the [Apple App Store](https://apps.apple.com/us/app/enclave-bridge/id6758280835?mt=12)
+
 ---
 
 ## Overview
