@@ -18,3 +18,9 @@ echo "Moving ${ZIP_FILE} to ${PROJECT_ROOT}"
 mv "${ZIP_FILE}" "$PROJECT_ROOT"
 
 "${SCRIPT_DIR}"/5-build-for-app-store.sh
+
+echo "Moving dmg back to export folder"
+mv "${PROJECT_ROOT}/${DMG_NAME}.dmg" "${PROJECT_ROOT}/build/export/"
+
+echo "Moving zip back to export folder"
+mv "${PROJECT_ROOT}/${DMG_NAME}.zip" "${PROJECT_ROOT}/build/export/"
