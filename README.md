@@ -1,12 +1,22 @@
 # Enclave Bridge
 
 <p align="center">
-  <img src="EnclaveBridge.svg" alt="Enclave Bridge Logo" width="128" height="128">
+  Enclave Bridge is being deprecated in favor of <a href="https://nexus.digitaldefiance.org">BrightNexus</a> which is the next evolution of the <a href="https://github.brightchain.org/docs/papers/enclave-bridge-protocol/">Enclave Bridge Protocol</a> which combines into a new spec/RFC, <a href="https://github.brightchain.org/docs/papers/sdi-enclave-bridge/">OSC 7777 v3 - SDI Enclave Bridge</a>.
+</p>
+
+<p align="center">
+  <img height="100" alt="brightnexus" src="https://github.com/user-attachments/assets/5c249dee-e396-483d-9214-dce26b51baea" />
+</p>
+
+<p align="center">
+  <img src="EnclaveBridge.svg" alt="Enclave Bridge Logo" width="128" height="128" />
 </p>
 
 <p align="center">
   <strong>A secure bridge between Node.js and Apple's Secure Enclave</strong>
 </p>
+
+---
 
 <p align="center">
   <a href="#features">Features</a> •
